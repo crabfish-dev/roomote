@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500" role="img" aria-label="Roomote — Your TV, within reach. Wi-Fi remote for Android TV and Google TV."><title>Roomote — Your TV, within reach. Wi-Fi remote for Android TV and Google TV.</title><rect width="1024" height="500" fill="#1F2B36"/>
+   <circle cx="1050" cy="38" r="260" fill="none" stroke="#293947" stroke-width="2"/>
+   <circle cx="1040" cy="18" r="330" fill="none" stroke="#293947" stroke-width="2"/>
+   <text x="64" y="91" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" letter-spacing="-1.3" fill="#F8F7F2">Roomote</text>
+   <text x="60" y="208" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-2.6" fill="#F8F7F2">Your TV,</text>
+   <text x="60" y="282" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="700" letter-spacing="-2.6" fill="#F8F7F2">within reach.</text>
+   <path d="M64 327H128" stroke="#A64B2E" stroke-width="5" stroke-linecap="round"/>
+   <text x="64" y="372" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#D0D4CF">Wi-Fi remote for Android TV &amp; Google TV</text>
+   <text x="64" y="406" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#B8C0BD">Pair once. Settle in.</text>
+   <g transform="translate(817 247) scale(4.9) translate(-51 -48)"><path d="M24 75V30C24 22 30 16 38 16H50C66 16 76 26 76 40C76 50 71 58 62 62L77 76Q80 80 74 80H61Q59 80 58 78L43 59H38V75Q38 80 33 80H29Q24 80 24 75Z M62 39A12 12 0 1 1 38 39A12 12 0 1 1 62 39Z" fill="#F8F7F2" fill-rule="evenodd"/><path d="M56 39A6 6 0 1 1 44 39A6 6 0 1 1 56 39Z" fill="#A64B2E"/></g></svg>

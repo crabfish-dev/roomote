@@ -1,0 +1,1 @@
+A Wi-Fi remote for compatible Android TV and Google TV devices.

@@ -1,0 +1,5 @@
+package_name(ENV["ANDROID_PACKAGE_NAME"] || "com.elvi.tvremote")
+# Prefer this app's credential; never silently select another app's secret.
+per_app_key = File.expand_path("~/.android-dev/secrets/com.elvi.tvremote/play-service-account.json")
+default_key = File.expand_path("~/.android-dev/secrets/play-service-account.json")
+json_key_file(ENV["SUPPLY_JSON_KEY"] || (File.file?(per_app_key) ? per_app_key : default_key))

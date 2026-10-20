@@ -1,0 +1,30 @@
+Control your compatible Android TV or Google TV from your Android phone with Roomote.
+
+Connect your phone and TV to the same local network, choose your TV, and enter the pairing code shown on its screen. Roomote saves the pairing on your phone and reconnects to your last successfully connected TV when you return to the app.
+
+REMOTE CONTROLS
+• Direction pad and select
+• Back, Home and Menu
+• Volume and mute
+• Play/pause, previous and next
+• Power and input controls where supported by your TV
+
+FIND AND SAVE YOUR TV
+Discover compatible TVs on your network or enter a TV's IP address manually. Keep multiple saved TVs and switch between them.
+
+LOCAL CONNECTION
+Remote commands travel directly between your phone and TV over an encrypted connection. Roomote uses no developer-operated remote-control server. Pairing exchanges a public certificate with your TV; its private key stays in Android's secure keystore.
+
+Roomote is free, with no advertising, in-app purchases or Roomote account.
+
+COMPATIBILITY
+Your TV must provide the compatible Android TV Remote Service v2. Availability and supported buttons depend on the TV's software. Having Android TV or Google TV alone does not guarantee compatibility.
+
+The TV must be reachable on your local network. Guest Wi-Fi and networks that isolate devices can prevent connection. Power controls cannot turn on an unplugged TV or a TV whose network connection is unavailable.
+
+Roomote does not provide infrared control, voice input, text entry, screen mirroring or casting. It does not include TV channels or streaming content.
+
+Roomote is an independent app and is not affiliated with Google or any TV manufacturer.
+
+Support: santu0002@gmail.com
+Privacy: https://roomote.crabfish.dev/privacy/

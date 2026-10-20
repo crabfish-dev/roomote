@@ -1,0 +1,12 @@
+{
+  "accountId": "YOUR_CLOUDFLARE_ACCOUNT_ID",
+  "worker": {
+    "name": "your-remote-site",
+    "compatibilityDate": "2026-10-20",
+    "domains": ["remote.example.com"],
+    "assets": {
+      "htmlHandling": "auto-trailing-slash",
+      "notFoundHandling": "404-page"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f8f7f2"/>
+  <circle cx="1010" cy="315" r="260" fill="#eed8c8"/>
+  <rect x="72" y="66" width="52" height="52" rx="13" fill="#1f2b36"/>
+  <g transform="translate(72 66) scale(0.5416666667)"><g transform="translate(48 48) scale(1) translate(-51 -48)"><path d="M24 75V30C24 22 30 16 38 16H50C66 16 76 26 76 40C76 50 71 58 62 62L77 76Q80 80 74 80H61Q59 80 58 78L43 59H38V75Q38 80 33 80H29Q24 80 24 75Z M62 39A12 12 0 1 1 38 39A12 12 0 1 1 62 39Z" fill="#F8F7F2" fill-rule="evenodd"/><path d="M56 39A6 6 0 1 1 44 39A6 6 0 1 1 56 39Z" fill="#A64B2E"/></g></g>
+  <text x="141" y="104" font-family="Arial,sans-serif" font-size="37" font-weight="700" fill="#1f2b36">Roomote</text>
+  <text x="72" y="255" font-family="Arial,sans-serif" font-size="76" font-weight="700" fill="#1f2b36">Your TV.</text>
+  <text x="72" y="346" font-family="Georgia,serif" font-size="79" font-style="italic" fill="#a64b2e">Within reach.</text>
+  <text x="76" y="413" font-family="Arial,sans-serif" font-size="25" fill="#596568">A simple phone remote for Android TV &amp; Google TV.</text>
+  <text x="76" y="551" font-family="Arial,sans-serif" font-size="20" fill="#596568">Free. No ads. No account.</text>
+  <g transform="translate(900,91) rotate(9,100,210)">
+    <rect width="195" height="440" rx="38" fill="#1f2b36"/>
+    <rect x="8" y="8" width="179" height="424" rx="30" fill="#f8f7f2"/>
+    <text x="27" y="62" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#1f2b36">Roomote</text>
+    <circle cx="157" cy="52" r="5" fill="#35664c"/>
+    <circle cx="97.5" cy="210" r="73" fill="#eeeee6" stroke="#d8dad2"/>
+    <circle cx="97.5" cy="210" r="28" fill="#1f2b36"/>
+    <text x="97.5" y="216" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#f8f7f2">OK</text>
+    <g stroke="#1f2b36" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="m90 160 7.5-7 7.5 7m-15 100 7.5 7 7.5-7m-57-58-7 8 7 8m99-16 7 8-7 8"/></g>
+    <rect x="25" y="311" width="65" height="66" rx="16" fill="#eeeee6"/><rect x="105" y="311" width="65" height="66" rx="16" fill="#1f2b36"/>
+    <path d="M43 344h29m-14.5-14.5v29" stroke="#1f2b36" stroke-width="3" stroke-linecap="round"/><path d="m130 334 15 10-15 10z" fill="#f8f7f2"/>
+  </g>
+</svg>

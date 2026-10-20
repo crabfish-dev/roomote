@@ -1,0 +1,5 @@
+Initial Google Play release of Roomote.
+• Pair with a compatible TV using its on-screen code.
+• Save TVs and reconnect to your last successful connection.
+• Use navigation, volume, media and supported power controls.
+• Improved disconnect and pairing cancellation reliability.

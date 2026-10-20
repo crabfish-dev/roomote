@@ -1,0 +1,147 @@
+require_relative "../scripts/release_support"
+default_platform(:android)
+
+platform :android do
+  def project_dir = File.expand_path(File.join("..", ENV.fetch("ANDROID_PROJECT_DIR", ".")), __dir__)
+  def app_module = ENV.fetch("ANDROID_APP_MODULE", "app")
+  def flavor = ENV.fetch("ANDROID_FLAVOR", "")
+
+  def version_props(options)
+    UI.user_error!("Automatic version bumps are disabled. Supply reviewed version_code and version_name values.") if options[:bump]
+    { "versionCode" => options[:version_code], "versionName" => options[:version_name] }.compact.transform_values(&:to_s)
+  end
+
+  def signed_build(kind, options)
+    UI.message("Building and verifying the signed release; signing values and Gradle output are withheld.")
+    RoomoteRelease.signed_build(project: project_dir, app_module: app_module,
+      flavor: flavor, kind: kind, version: version_props(options))
+  rescue RoomoteRelease::Error => error
+    UI.user_error!(error.message)
+  end
+
+  def prepared_upload(options, operation: "upload")
+    UI.user_error!("Provide manifest: and audit: paths. See docs/releasing.md.") unless options[:manifest] && options[:audit]
+    prepared = RoomoteRelease.verify_prepared(
+      File.expand_path(options[:manifest], project_dir),
+      File.expand_path(options[:audit], project_dir), operation: operation)
+    manifest, audit = prepared.values_at(:manifest, :audit)
+    %i[track status rollout changes_not_sent_for_review version_code version_name].each do |option|
+      UI.user_error!("Release settings come from the audit record; remove #{option}:.") if options.key?(option)
+    end
+    args = {
+      package_name: manifest.fetch("package_name"),
+      track: audit.fetch("track"),
+      release_status: audit.fetch("release_status"),
+      changes_not_sent_for_review: audit.fetch("changes_not_sent_for_review"),
+      rescue_changes_not_sent_for_review: false,
+      metadata_path: prepared.fetch(:metadata),
+      skip_upload_metadata: !audit.fetch("upload_metadata"),
+      skip_upload_images: !audit.fetch("upload_images"),
+      skip_upload_screenshots: !audit.fetch("upload_screenshots"),
+      skip_upload_changelogs: false,
+      version_codes_to_retain: [],
+      release_name: "#{manifest.fetch('version_name')} (#{manifest.fetch('version_code')})",
+    }
+    args[:rollout] = audit["rollout"].to_s unless audit["rollout"].nil?
+    if operation == "upload"
+      args.merge!(aab: prepared.fetch(:aab), mapping: prepared.fetch(:mapping),
+                  skip_upload_apk: true, skip_upload_aab: false)
+    elsif operation == "promote"
+      source = audit.fetch("source_track")
+      available = google_play_track_version_codes(package_name: manifest.fetch("package_name"), track: source).map(&:to_i).uniq
+      UI.user_error!("The source track must contain only the reviewed version before promotion.") unless available == [manifest.fetch("version_code")]
+      args.merge!(track: source, track_promote_to: audit.fetch("track"),
+                  track_promote_release_status: audit.fetch("release_status"),
+                  version_code: manifest.fetch("version_code"),
+                  skip_upload_aab: true, skip_upload_apk: true)
+    else
+      args.merge!(skip_upload_aab: true, skip_upload_apk: true, skip_upload_changelogs: true)
+    end
+    # No build, bump, flag retry, or fallback occurs after this point.
+    upload_to_play_store(**args)
+  rescue RoomoteRelease::Error => error
+    UI.user_error!(error.message)
+  end
+
+  desc "Run unit tests"
+  lane :unit_test do
+    gradle(project_dir: project_dir, task: "#{app_module}:test", flavor: flavor,
+           build_type: "Debug", print_command: false)
+  end
+
+  desc "Build a debug APK"
+  lane :debug do
+    gradle(project_dir: project_dir, task: "#{app_module}:assemble", flavor: flavor,
+           build_type: "Debug", print_command: false)
+  end
+
+  desc "Build and verify a signed release AAB; version_code: and version_name: are explicit"
+  lane :release_aab do |options|
+    artifact = signed_build("aab", options)
+    lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH] = artifact.fetch(:path)
+    UI.success("Verified signed AAB: #{artifact.fetch(:path)}")
+  end
+
+  desc "Build and verify a signed release APK for sideloading"
+  lane :release_apk do |options|
+    artifact = signed_build("apk", options)
+    lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH] = artifact.fetch(:path)
+    UI.success("Verified signed APK: #{artifact.fetch(:path)}")
+  end
+
+  desc "Build once and freeze verified AAB, mapping, metadata and SHA-256 manifest"
+  lane :freeze_release do |options|
+    version = version_props(options)
+    RoomoteRelease.require_version!(version)
+    destination = File.expand_path(
+      options[:output] || "releases/#{version.fetch('versionCode')}-#{version.fetch('versionName')}", project_dir)
+    UI.user_error!("Freeze destination exists; never overwrite a reviewed release.") if File.exist?(destination) || File.symlink?(destination)
+    artifact = signed_build("aab", options)
+    manifest = RoomoteRelease.freeze(artifact: artifact, project: project_dir,
+      destination: destination, metadata: File.join(project_dir, "fastlane", "metadata", "android"))
+    UI.success("Frozen release manifest: #{manifest}")
+    UI.message("Complete the Console audit for this exact manifest before upload_prepared.")
+  rescue RoomoteRelease::Error => error
+    UI.user_error!(error.message)
+  end
+
+  desc "Upload only the unchanged frozen release; requires manifest: and audit:"
+  lane(:upload_prepared) { |options| prepared_upload(options) }
+
+  desc "Freeze final listing assets around the exact tested candidate AAB; never builds"
+  lane :finalize_listing do |options|
+    unless options[:manifest] && options[:tested_aab_sha256] && options[:output]
+      UI.user_error!("Provide candidate manifest:, tested_aab_sha256:, and a new output: directory.")
+    end
+    manifest = RoomoteRelease.finalize_listing(
+      manifest_path: File.expand_path(options[:manifest], project_dir),
+      tested_aab_sha256: options[:tested_aab_sha256],
+      project: project_dir, destination: File.expand_path(options[:output], project_dir),
+      metadata: File.join(project_dir, "fastlane", "metadata", "android"))
+    UI.success("Final listing snapshot with unchanged tested AAB: #{manifest}")
+  rescue RoomoteRelease::Error => error
+    UI.user_error!(error.message)
+  end
+
+  desc "Check the configured Play service-account key"
+  lane(:validate_key) do
+    validate_play_store_json_key(json_key: CredentialsManager::AppfileConfig.try_fetch_value(:json_key_file))
+  end
+
+  desc "Compatibility entry point for upload_prepared; never builds or bumps"
+  lane(:deploy) { |options| prepared_upload(options) }
+
+  desc "Upload a prepared release whose audit explicitly selects internal"
+  lane :internal do |options|
+    UI.user_error!("Provide audit: selecting track internal.") unless options[:audit]
+    audit = JSON.parse(File.read(File.expand_path(options[:audit], project_dir)))
+    UI.user_error!("Audit does not select internal.") unless audit["track"] == "internal"
+    prepared_upload(options)
+  end
+
+  desc "Promote the frozen version from its audited source track; requires manifest: and audit:"
+  lane(:promote) { |options| prepared_upload(options, operation: "promote") }
+
+  desc "Upload reviewed frozen listing assets only; requires manifest: and audit:"
+  lane(:metadata) { |options| prepared_upload(options, operation: "metadata") }
+end

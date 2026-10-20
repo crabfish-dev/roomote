@@ -1,0 +1,13 @@
+{
+  "package_name": "com.elvi.tvremote",
+  "title": "Roomote",
+  "default_language": "en-US",
+  "publisher_name": "Santosh A",
+  "contact_email": "santu0002@gmail.com",
+  "contact_website": "https://roomote.crabfish.dev/privacy/",
+  "privacy_policy_url": "https://roomote.crabfish.dev/privacy/",
+  "price": "free",
+  "contains_ads": false,
+  "in_app_purchases": false,
+  "note": "Console reference only. Fastlane supply does not upload these app-content/contact declarations from this file."
+}
