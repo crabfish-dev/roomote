@@ -15,7 +15,7 @@ worker.mkdir(parents=True, exist_ok=True)
 assets = worker / "assets"
 if assets.exists():
     shutil.rmtree(assets)
-shutil.copytree(root / "dist", assets)
+shutil.copytree(root / "dist", assets, ignore=shutil.ignore_patterns(".DS_Store", "._*"))
 (output / "config.json").write_text(json.dumps({
     "accountId": config["accountId"], "buildContext": {"isPreview": False}
 }, indent=2) + "\n")
