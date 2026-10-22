@@ -43,6 +43,14 @@ physical router's DHCP assignment or exercise its multicast behavior. A real TV
 and router address-change test remains outstanding. These records establish
 local verification, not website deployment or Google Play publication.
 
+For the Play submission, Fastlane also froze the signed 1.4.0 (6) AAB with SHA-256
+`09540b3f7e2ba000ec8c91a7adffeef0983b0a46b86c383556bae6b8be11bc9a` and the same
+mapping hash above. It targets API 36 and contains no native libraries. An APK
+derived from that exact bundle passed 10 runtime checks: a retained-pairing
+upgrade from signed 1.3.0, cold-start reconnect, all 16 controls, address update,
+disconnect and forget. Its compiled DEX matches the previously tested direct APK.
+The temporary emulator and protocol fixture were stopped after testing.
+
 Legacy migration preserves saved entries and the last-used selection. It copies
 only the exact last-successful record's pin when its address ownership is
 unambiguous. Other legacy entries need one explicit pairing; guessing their pins

@@ -1,0 +1,4 @@
+Improved automatic reconnect when your TV's IP address changes.
+Saved TVs now keep a stable identity and verify their existing pairing before updating an address.
+Added Update address in TV settings when network discovery is unavailable.
+Improved cancellation and saved-TV migration. Older additional saved TVs may need one fresh pairing.
