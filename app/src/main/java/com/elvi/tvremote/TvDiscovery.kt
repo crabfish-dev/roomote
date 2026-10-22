@@ -22,7 +22,9 @@ class TvDiscovery(
     private var listener: NsdManager.DiscoveryListener? = null
     private var multicast: WifiManager.MulticastLock? = null
     private var generation = 0
-    private var resolving = false
+    private var resolveToken = 0
+    private var resolving: Int? = null
+    private var resolveTimeout: Runnable? = null
     private val pending = ArrayDeque<Pair<Int, NsdServiceInfo>>()
     private val present = mutableSetOf<String>()
     private var stopScan: Runnable? = null
@@ -74,25 +76,36 @@ class TvDiscovery(
     }
 
     private fun resolveNext() {
-        if (resolving) return
+        if (resolving != null) return
         while (pending.isNotEmpty()) {
             val (epoch, info) = pending.removeFirst()
             if (epoch != generation || info.serviceName !in present) continue
-            resolving = true
+            val token = ++resolveToken
+            resolving = token
+            resolveTimeout = Runnable {
+                if (resolving == token) {
+                    resolving = null
+                    resolveNext()
+                }
+            }.also { main.postDelayed(it, 6_000) }
             try {
                 nsd.resolveService(info, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(service: NsdServiceInfo, code: Int) = main.postUnit {
-                        resolving = false
-                        resolveNext()
+                        if (!finishResolve(token)) return@postUnit
+                        if (epoch == generation && info.serviceName in present && code == NsdManager.FAILURE_ALREADY_ACTIVE) {
+                            // An older platform may still be completing a cancelled scan's lookup.
+                            pending.addFirst(epoch to info)
+                            main.postDelayed({ if (epoch == generation) resolveNext() }, 300)
+                        } else resolveNext()
                     }
                     override fun onServiceResolved(service: NsdServiceInfo) = main.postUnit {
-                        resolving = false
+                        if (!finishResolve(token)) return@postUnit
                         if (epoch == generation && info.serviceName in present) {
                             service.host?.hostAddress?.let { host ->
                                 val name = service.attributes["fn"]?.toString(Charsets.UTF_8)
                                     ?.takeIf { it.isNotBlank() } ?: service.serviceName
                                 if (service.port in 1..65535) {
-                                    onDevice(TvDevice(service.serviceName, name, host, service.port))
+                                    onDevice(TvDevice(service.serviceName, name, host, service.port, discoveryId = service.serviceName))
                                 }
                             }
                         }
@@ -100,15 +113,26 @@ class TvDiscovery(
                     }
                 })
             } catch (_: Exception) {
-                resolving = false
+                finishResolve(token)
                 continue
             }
             return
         }
     }
 
+    private fun finishResolve(token: Int): Boolean {
+        if (resolving != token) return false
+        resolving = null
+        resolveTimeout?.let(main::removeCallbacks)
+        resolveTimeout = null
+        return true
+    }
+
     fun stop() {
         generation++
+        resolving = null
+        resolveTimeout?.let(main::removeCallbacks)
+        resolveTimeout = null
         stopScan?.let(main::removeCallbacks)
         stopScan = null
         listener?.let { runCatching { nsd.stopServiceDiscovery(it) } }

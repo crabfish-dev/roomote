@@ -15,12 +15,22 @@ parser.add_argument("--version", required=True, help="Version ID returned by cf 
 args = parser.parse_args()
 root = Path(__file__).resolve().parent
 base = "https://roomote.crabfish.dev"
+expected_apks = {
+    "/downloads/roomote-1.3.0.apk": {
+        "filename": "Roomote-1.3.0.apk",
+        "sha256": "a3d063210b158fe0e922a8625746ae3a229b870990d5d61652980e917a94ccad",
+    },
+    "/downloads/roomote-1.4.0.apk": {
+        "filename": "Roomote-1.4.0.apk",
+        "sha256": "93df0ea33806b558a884cc933185dcca944472b926232c3aa54bee2c2fc9f4de",
+    },
+}
 routes = {
     "/": ("index.html", 200),
     "/privacy/": ("privacy/index.html", 200),
     "/support/": ("support/index.html", 200),
     "/test/": ("test/index.html", 200),
-    "/downloads/roomote-1.3.0.apk": ("downloads/roomote-1.3.0.apk", 200),
+    **{route: (route.lstrip("/"), 200) for route in expected_apks},
     "/sitemap.xml": ("sitemap.xml", 200),
     "/robots.txt": ("robots.txt", 200),
     "/assets/icon.svg": ("assets/icon.svg", 200),
@@ -81,6 +91,7 @@ def inspect(route):
 with ThreadPoolExecutor(max_workers=5) as pool:
     results = list(pool.map(inspect, routes))
 
+apk_results = [item for item in results if item["path"] in expected_apks]
 checks = {
     "expected_http_statuses": all(item["status"] == item["expected_status"] for item in results),
     "response_matches_source": all(item["matches_deployed_source"] for item in results),
@@ -90,8 +101,12 @@ checks = {
     "no_analytics_beacon": all(not item["analytics_script_found"] for item in results),
     "no_set_cookie": all(not item["sets_cookie"] for item in results),
     "privacy_alias_redirects": next(item for item in results if item["path"] == "/privacy-policy")["final_url"] == base + "/privacy/",
-    "apk_content_type": next(item for item in results if item["path"].endswith(".apk"))["headers"].get("content-type") == "application/vnd.android.package-archive",
-    "apk_download_filename": next(item for item in results if item["path"].endswith(".apk"))["headers"].get("content-disposition") == 'attachment; filename="Roomote-1.3.0.apk"',
+    "apk_content_type": all(item["headers"].get("content-type") == "application/vnd.android.package-archive" for item in apk_results),
+    "apk_download_filename": all(
+        item["headers"].get("content-disposition") == f'attachment; filename="{expected_apks[item["path"]]["filename"]}"'
+        for item in apk_results
+    ),
+    "apk_matches_verified_binary": all(item["sha256"] == expected_apks[item["path"]]["sha256"] for item in apk_results),
 }
 evidence = {
     "verified_at": datetime.now(timezone.utc).isoformat(),

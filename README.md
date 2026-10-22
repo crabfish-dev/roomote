@@ -14,7 +14,7 @@ The direct download page includes installation instructions. The test APK and Go
 
 - Local TV discovery and manual IP address entry.
 - Six-character TV-code pairing and saved devices.
-- Automatic reconnection to the last successfully connected TV.
+- Automatic reconnection to the last successfully connected TV, including discovery-assisted recovery after its IP address changes.
 - Directional pad, OK, Home, Back, Menu, and input selection.
 - Volume, mute, playback, and power controls.
 - Connection management, help, and privacy information in TV settings.
@@ -43,11 +43,15 @@ The phone and TV must be on the same reachable local network. A TV connected to 
 2. Open Roomote and tap the TV icon at the top right to open **TV settings**. Select a discovered or saved TV. If discovery does not find it, enter the TV's IP address from its network settings.
 3. Start pairing and enter the six-character code displayed on that TV. Codes can contain hexadecimal letters as well as digits.
 4. After the connection is ready, use the directional pad, OK, Home, Back, volume, and playback controls.
-5. Roomote automatically reconnects to the last successfully connected TV when you open it again. You can switch TVs from the TV icon. If the TV rejects the saved pairing, pair again.
+5. Roomote automatically reconnects to the last successfully connected TV when you open it again. You can switch TVs from the TV icon. A router assigning a new IP address does not require another pairing code when Roomote can rediscover and authenticate the TV.
 
-The main screen keeps the remote controls together. TV settings contains connection status, discovery, manual address entry, disconnect/reconnect, pairing, forgetting a TV, and connection help. A small indicator on the TV icon shows the current connection state.
+The main screen keeps the remote controls together. TV settings contains connection status, discovery, manual address entry, disconnect/reconnect, pairing, forgetting a TV, and connection help. For a saved TV, **Update address** lets you enter its new IP while keeping the existing pairing. A small indicator on the TV icon shows the current connection state.
 
-Automatic reconnect makes one attempt when the app opens or returns to the foreground, and leaves an existing connection or pairing in progress alone. If the TV is unavailable, tap the TV icon to retry. Disconnect stays disconnected until you reopen the app; forgetting the last TV also clears the automatic selection. When upgrading from a version without this feature, a single saved TV becomes the initial automatic selection.
+Automatic reconnect makes one recovery attempt when the app opens or returns to the foreground, and leaves an existing connection or pairing in progress alone. With a saved pairing, it searches for up to 30 seconds and tries at most 16 distinct endpoints, using the saved address and local discovery results. Every candidate must authenticate as the saved TV. If discovery is blocked, use **Update address** for that saved TV instead of forgetting it. If the TV is unavailable, tap the TV icon to retry.
+
+Disconnect cancels the recovery attempt and stays disconnected until the next foreground visit; forgetting the last TV also clears the automatic selection. TV names and IP addresses are discovery hints, not proof of identity. A changed certificate or revoked authorization still requires explicit pairing with a fresh on-screen code.
+
+On upgrade, existing saved TVs receive stable local IDs and retain the last-used selection. The last successfully connected TV's pairing migrates when its recorded identity and successful address are unambiguous. Other TVs saved by older versions need one explicit pairing to establish their new identity; their saved entries remain available. This avoids assigning another TV's old IP-based certificate to them after addresses have changed. Subsequent IP changes use the stable pairing and do not require that migration step again.
 
 Pairing with this protocol does not require enabling developer options, ADB, or USB debugging. Each phone has its own pairing identity.
 
@@ -99,7 +103,7 @@ Emulator and simulator results do not establish compatibility with a real TV or 
 
 ## Privacy and security
 
-Saved TV details and certificate fingerprints remain in private app storage. The phone's pairing private key is generated in Android Keystore. Pairing and remote control use TLS; the public pairing certificate can be visible in a TLS 1.2 handshake, and local discovery announcements are not encrypted.
+Saved TV details and certificate fingerprints remain in private app storage. Each saved TV has a stable local UUID, and its authenticated certificate is pinned to that identity rather than its current IP address. Roomote only saves a rediscovered or manually updated address after TLS authentication and the remote protocol handshake succeed. The phone's pairing private key is generated in Android Keystore. Pairing and remote control use TLS; the public pairing certificate can be visible in a TLS 1.2 handshake, and local discovery announcements are not encrypted.
 
 **Forget TV** removes that TV's saved details and certificate fingerprint. It does not delete the phone's shared pairing identity or revoke authorization stored by the TV. Clear Roomote's storage or uninstall it to remove local app data; use the TV's own paired-device settings to revoke access there.
 
@@ -113,7 +117,9 @@ See the [privacy policy](https://roomote.crabfish.dev/privacy/) for details and 
 | Manual IP also cannot connect | Confirm the address, that the TV is awake, and that Android TV Remote Service is installed and enabled. V2 normally listens on TCP 6466 and 6467. |
 | No pairing code appears | Check the Remote Service version and any available TV/service updates. An unsupported service cannot be fixed by changing the phone UI. |
 | Pairing code is rejected | Use the current code shown by the selected TV, including any letters. Start a new pairing attempt if it has expired. |
-| A saved TV stops connecting | Its IP may have changed, the service may have reset, or the TV may have forgotten the phone. Rediscover it and pair again if necessary. |
+| A saved TV's IP address changes | Reopen Roomote or select the saved TV to trigger bounded rediscovery. If multicast is blocked, use that TV's **Update address** action. The saved pairing is retained. |
+| A saved TV still rejects the connection | Confirm the address and service availability. A reset certificate or revoked phone authorization requires explicit pairing with a new TV code. |
+| Another previously saved TV needs pairing after an upgrade | Older versions did not retain enough identity information for every TV. Select its saved entry and pair once. The most recently used pairing migrates when its ownership can be established safely. |
 | Connection works but a key has no effect | Try Home or a directional key. Input, volume, and media handling can vary with firmware, the current app, and an external audio system. |
 | Power off works but power on does not | The TV may disable networking in standby. Review the TV's supported standby settings; the app cannot wake a network service that is offline. |
 

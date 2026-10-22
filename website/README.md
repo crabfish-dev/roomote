@@ -67,8 +67,20 @@ The maintained download is at [roomote.crabfish.dev/test/](https://roomote.crabf
 Generated APKs are distributed separately and are excluded from Git. To preview
 or deploy the download locally, place the exact tested APK at the path linked by
 `dist/test/index.html` and covered by `_headers`, currently
-`dist/downloads/roomote-1.3.0.apk`. Do not overwrite a versioned URL with a different
-binary. Verify the public download against the tested APK's SHA-256.
+`dist/downloads/roomote-1.4.0.apk`. Keep `dist/downloads/roomote-1.3.0.apk` available
+as well: its previously shared URL and download headers remain valid. Do not
+overwrite a versioned URL with a different binary. `verify-deploy.py` checks both
+versions against their expected SHA-256 values as well as the local files.
+
+The prepared 1.4.0 APK is version code 6, 78,172 bytes, with SHA-256
+`93df0ea33806b558a884cc933185dcca944472b926232c3aa54bee2c2fc9f4de`.
+Deploy the exact verified binary; these source updates do not themselves confirm
+that the new download is publicly available.
+
+Users of the earlier direct APK should install over the existing copy to preserve
+their app data. The last-used pairing migrates when its identity can be established;
+other legacy saved TVs need one explicit pairing. Subsequent address changes can
+use discovery-assisted recovery or the saved TV's **Update address** action.
 
 A manually signed APK can have a different certificate from a Google Play build.
 Moving between them requires uninstalling and pairing TVs again. Keep that

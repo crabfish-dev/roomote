@@ -5,8 +5,6 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -103,16 +101,7 @@ class AutoReconnectTest {
 
     private fun createController(vararg saved: TvDevice) {
         val preferences = context.getSharedPreferences("roomote.devices", Context.MODE_PRIVATE)
-        val devices = JSONArray()
-        saved.forEach { tv ->
-            devices.put(JSONObject()
-                .put("id", tv.id)
-                .put("name", tv.name)
-                .put("host", tv.host)
-                .put("port", tv.port)
-                .put("pairingPort", tv.pairingPort))
-        }
-        assertTrue(preferences.edit().putString("devices", devices.toString()).commit())
+        SavedTvStore(preferences).save(saved.toList())
         LastUsedTvStore(preferences).remember(tvA)
         // The namespaced peer-pin preferences are empty. connect() therefore fails
         // before loading a keystore identity, resolving a host, or opening a socket.

@@ -68,20 +68,28 @@ class LastUsedTvStoreTest {
         assertEquals(moved, store.get(listOf(oldAddressAlias, moved)))
     }
 
-    @Test fun resolvesAnAliasAtTheRememberedAddress() {
+    @Test fun doesNotSelectAnotherIdentityAtTheRememberedAddress() {
         store.remember(livingRoom)
         val alias = livingRoom.copy(id = "manual:${livingRoom.host}")
 
-        assertEquals(alias, store.get(listOf(bedroom, alias)))
+        assertNull(store.get(listOf(bedroom, alias)))
     }
 
-    @Test fun forgettingAnAddressAliasDoesNotFallBackToAnotherTv() {
+    @Test fun forgettingAnotherIdentityAtTheSameAddressPreservesSelection() {
         store.remember(livingRoom)
         store.forget(livingRoom.copy(id = "manual:${livingRoom.host}"))
 
-        assertNull(LastUsedTvStore(prefs).get(listOf(bedroom)))
+        assertEquals(livingRoom, LastUsedTvStore(prefs).get(listOf(livingRoom, bedroom)))
         store.remember(bedroom)
         assertEquals(bedroom, store.get(listOf(bedroom)))
+    }
+
+    @Test fun resolvesChangedAddressByIdentityAndUpdatesCachedHost() {
+        store.remember(livingRoom)
+        val moved = livingRoom.copy(host = "192.0.2.30")
+
+        assertEquals(moved, store.get(listOf(moved)))
+        assertEquals(moved.host, prefs.getString("last_used_tv_host", null))
     }
 
     @Test fun forgettingByIdClearsAnOldAddress() {
@@ -108,5 +116,12 @@ class LastUsedTvStoreTest {
         store.remember(livingRoom)
 
         assertNull(LastUsedTvStore(prefs).get(listOf(bedroom)))
+    }
+
+    @Test fun missingInitializationMarkerDoesNotReplaceAnExistingSelection() {
+        prefs.edit().putString("last_used_tv_id", livingRoom.id)
+            .putString("last_used_tv_host", livingRoom.host).commit()
+
+        assertNull(store.get(listOf(bedroom)))
     }
 }

@@ -14,6 +14,63 @@ with one TV, and the user reported that most buttons worked. These results do
 not establish compatibility with every model or standby mode. Private device
 captures and publisher records are intentionally not included in this repository.
 
+## Address-change recovery — verified local checks, 22 October 2026
+
+The working source adds stable saved-TV UUIDs and UUID-associated certificate
+pins, migration of the eligible last-used pairing, bounded discovery-assisted recovery after
+an address change, and an explicit **Update address** action. The 1.3.0 results
+above predate this change and do not validate it. The final source build, Android
+lint, 14 JVM tests and 65 Android instrumentation tests passed. Release guard
+checks passed with 68 assertions, and the emulator crash buffer was empty.
+
+The exact signed 1.4.0 APK (version code 6) was installed over the signed 1.3.0
+copy and checked against the local TV fixture. The upgrade preserved the last-used
+pairing without a new code. Home and volume commands reached the fixture. Using
+**Update address** to move from `10.0.2.2` to `127.0.0.1` with the same fixture
+certificate reconnected without a code; a cold start then automatically used
+the new address. Disconnect, forget, and a cold start after forgetting completed
+without a crash or automatic reconnection to the forgotten TV.
+
+| Signed artifact record | Value |
+| --- | --- |
+| Version | 1.4.0 (6) |
+| APK size | 78,172 bytes |
+| APK SHA-256 | `93df0ea33806b558a884cc933185dcca944472b926232c3aa54bee2c2fc9f4de` |
+| Matching mapping SHA-256 | `d7d5028d915611b93db509e5e78705a7fc19b79e17a45f0c78fb50a800dfde3e` |
+
+These signed-artifact checks used an emulator and fixture; they did not change a
+physical router's DHCP assignment or exercise its multicast behavior. A real TV
+and router address-change test remains outstanding. These records establish
+local verification, not website deployment or Google Play publication.
+
+Legacy migration preserves saved entries and the last-used selection. It copies
+only the exact last-successful record's pin when its address ownership is
+unambiguous. Other legacy entries need one explicit pairing; guessing their pins
+from current IP addresses could connect to the wrong TV after an address swap.
+
+The regression checklist covers:
+
+- Preserve existing device records and last-used selection through migration;
+  migrate only the eligible last-successful pin, retry an interrupted migration
+  without changing UUIDs, and preserve records if writing a pin fails.
+- With multiple legacy TVs, verify that missing successful-address evidence,
+  ambiguous ownership and exchanged IP addresses never assign one TV's pin to
+  another record. Non-last-used entries remain saved and require explicit pairing.
+- Reconnect the selected TV at a new address with its existing certificate,
+  without requesting a new pairing code; save the endpoint only after TLS and
+  protocol readiness.
+- Reject a different certificate at the old address, including another saved TV,
+  then recover the original TV through discovery without replacing either pin.
+- Treat matching, changed and duplicate discovery names as hints only; deduplicate
+  endpoints and stay within one 30-second attempt with at most 16 candidates.
+- Recover when discovery arrives after the first connection fails, and handle a
+  protocol-handshake failure after the TLS connection has already succeeded.
+- Retain one attempt across rotation; ignore stale callbacks after disconnect,
+  forget, selecting another TV or shutdown, and end recovery cleanly when its
+  deadline expires.
+- Use the exact endpoint entered through **Update address**, retain the old saved
+  endpoint on failure, and authenticate with the existing TV pin.
+
 ## What local checks establish
 
 Compilation establishes that the app can be packaged. Local protocol tests can check encoding, parsing, pairing calculations, and error behavior without contacting a television. An Android phone emulator can check launch, layout, navigation, and error states.
@@ -70,12 +127,17 @@ Record the phone model/Android version, TV model/firmware, and installed Android
 | Enter a wrong or expired code | An understandable failure appears; another pairing attempt is possible. |
 | Cancel pairing | Attempt closes without saving a successful pairing. |
 | Reopen the app and select the paired TV | Saved credentials reconnect without asking for a new code. |
+| Upgrade with several legacy saved TVs | The eligible last-used pairing reconnects; other saved entries remain present and require one explicit pairing before using stable identity recovery. |
+| Change a paired TV's DHCP address, then reopen Roomote | Bounded rediscovery reconnects the same TV without forgetting or pairing again; its saved address changes only after the connection is ready. |
+| Reassign the old address to a second paired TV | Roomote rejects that endpoint for the original TV and only connects to a candidate matching the original TV's pin. |
+| Change a paired TV's advertised name as well as its address | Discovery can still recover it by validating candidate certificates; matching a name alone never authorizes a connection. |
+| Cancel while searching for a moved TV | Search stops reconnecting; later discovery and socket callbacks do not revive the cancelled session. |
 | Use Home, Back, all directions, and OK | TV navigates as expected without duplicate commands. |
 | Use volume, mute, media, menu, and input | Observe and record TV/app-specific behavior. |
 | Power the TV off and try to wake it | Record whether its service remains reachable; do not assume every standby mode supports wake. |
 | Disable TV network access while connected | App leaves the ready state and allows a subsequent retry. |
 | Switch Wi-Fi or leave the app | No stale discovery results or callbacks create a false connected state. |
-| Block multicast but keep unicast available | Manual IP entry can still reach a supported TV. |
+| Block multicast but keep unicast available | New TVs can use manual entry. A saved TV can use **Update address** to reconnect at its new IP with the existing pairing. |
 | Reset pairing on the TV | Reconnection fails clearly and allows pairing again. |
 | Connect to an endpoint presenting a different saved identity | App rejects the changed identity and requires an explicit new pairing. |
 

@@ -7,6 +7,8 @@ data class TvDevice(
     val port: Int = 6466,
     val pairingPort: Int = 6467,
     val saved: Boolean = false,
+    /** DNS-SD service instance used only to find a candidate address, never as trust. */
+    val discoveryId: String? = null,
 )
 
 enum class ConnectionPhase { IDLE, CONNECTING, CONNECTED, PAIRING, AWAITING_CODE, ERROR }

@@ -11,12 +11,12 @@ The Android app uses Kotlin and framework UI components, with a minimum phone AP
 | Component | Responsibility |
 | --- | --- |
 | Activity and UI | Keep remote controls on the main screen. The top-right TV icon opens TV settings with discovery, saved devices, connection state/actions and help. Collect the TV pairing code in a separate dialog. |
-| Discovery | Use Android `NsdManager` to resolve `_androidtvremote2._tcp` advertisements to an address and remote-service port. Manual IP entry covers networks where advertisements cannot be resolved. |
-| Connection controller | Serialize user actions, manage pairing and connection transitions, reconnect to the last used TV on foreground entry, and deliver state changes to the main thread. |
+| Discovery | Use Android `NsdManager` to resolve `_androidtvremote2._tcp` advertisements to an address and remote-service port. Advertisements supply candidate addresses, not trusted identity. Manual entry and a saved TV's Update address action cover networks where advertisements cannot be resolved. |
+| Connection controller | Serialize user actions, manage pairing and connection transitions, perform bounded recovery of the last used TV on foreground entry, and deliver state changes to the main thread. |
 | Remote client | Establish TLS connections, perform code pairing, frame protocol-buffer messages, negotiate control, send key events, and handle incoming keepalives and state. |
-| Local persistence | Retain saved device information, the last successful TV, and the app's pairing material so subsequent connections do not normally require another code. |
+| Local persistence | Keep a stable UUID for each saved TV, its endpoint and discovery hint, the last successful TV's UUID, and certificate pins associated with UUIDs. Only refresh an endpoint after authentication. Migrate the uniquely identified last-successful legacy pairing; preserve other records for explicit pairing. |
 
-The production source is under `app/src/main/java/com/elvi/tvremote/`. `MainActivity.kt` owns the screen, `RemoteController.kt` owns state and the worker executor, `TvDiscovery.kt` resolves services, and `protocol/RemoteClient.kt` owns the network sessions. The client identity lives in AndroidKeyStore; device metadata and TV certificate pins use private app preferences.
+The production source is under `app/src/main/java/com/elvi/tvremote/`. `MainActivity.kt` owns the screen, `RemoteController.kt` owns state and the worker executor, `TvDiscovery.kt` resolves services, and `protocol/RemoteClient.kt` owns the network sessions. `ConnectionServices.kt` supplies injectable connection and discovery boundaries for controller tests. `SavedTvStore.kt` handles device records and their identity migration; `LastUsedTvStore.kt` tracks the last successful identity. The client identity lives in AndroidKeyStore; device metadata and TV certificate pins use private app preferences.
 
 Discovery is advisory: a service name is not proof of identity, and an advertised endpoint can disappear. The client must complete pairing or authenticate a saved relationship before the UI reports that it is ready.
 
@@ -46,7 +46,13 @@ After opening the remote socket, the client must complete the protocol handshake
 
 Disconnect, forget, and pairing cancellation detach their sessions synchronously. When initiated on the main thread, physical socket closure runs on a separate cleanup executor: closing a TLS socket can send network traffic. This executor is independent of the connection worker so it can interrupt blocked reads. Cleanup captures the old socket only, and cannot close a replacement session.
 
-On each foreground entry, an idle or failed session makes one automatic connection attempt to the last successfully connected TV. Active sessions and pairing attempts are left alone. `LastUsedTvStore` persists the choice only after the protocol is ready, with a one-time migration for upgrades with exactly one saved TV. Forgetting that TV clears the automatic choice. A failed attempt never silently starts pairing or replaces a saved certificate.
+On each foreground entry, an idle or failed session makes one automatic recovery attempt to the last successfully connected TV. Active sessions and pairing attempts are left alone. A saved pairing allows a recovery window of up to 30 seconds with at most 16 distinct address/port candidates. Candidates come from the saved endpoint and local DNS-SD results; a matching discovery service name takes priority but does not establish trust. Duplicate endpoints are not retried within that attempt, and the app does not scan arbitrary network addresses.
+
+Every candidate uses the selected TV's UUID-associated certificate pin, including when another saved TV now occupies the old address. Synchronous connection failures and asynchronous protocol-handshake failures can advance to another candidate. The controller commits a recovered endpoint, discovery hint and last-used selection only after both TLS authentication and protocol readiness. A discovered address cannot replace saved metadata just because its service name matches.
+
+Each user operation has a generation, and each candidate has a separate attempt token. Late socket or discovery callbacks cannot revive a cancelled attempt or update a replacement connection. Disconnect, forget, pairing, selecting another TV, and controller shutdown invalidate pending recovery and its deadline. When recovery expires, the app preserves the saved pairing and offers a retry or **Update address**. This explicit address action authenticates the supplied endpoint with the existing pin and saves it only after readiness. A failed saved-TV connection never silently starts pairing or replaces its certificate.
+
+`LastUsedTvStore` resolves only the saved UUID after migration. Forgetting that TV clears the automatic choice without selecting another saved TV. For upgrades from versions that did not track use order, exactly one saved TV is an unambiguous initial choice.
 
 Disconnects, expired pairing attempts, unavailable services, and mismatched saved identities become recoverable UI states. After an automatic connection failure, the main screen offers access to TV settings for manual retry. The app does not continuously retry or replay a key after a new connection because a repeated power or navigation command can have a different effect.
 
@@ -58,7 +64,11 @@ ADB is deliberately outside the implementation scope. It requires a debugging re
 
 ## Pairing identity and trust
 
-The TV generally presents a self-signed certificate, so ordinary public web certificate validation is not sufficient for this protocol. Pairing binds the on-screen code to the client and server public keys. The implementation must save the authenticated TV identity and reject an unexpected replacement on a later connection instead of treating any certificate as trusted.
+The TV generally presents a self-signed certificate, so ordinary public web certificate validation is not sufficient for this protocol. Pairing binds the on-screen code to the client and server public keys. The authenticated certificate fingerprint is stored under the saved TV's UUID rather than its IP address. UUIDs identify local records; the pinned certificate authenticates the remote peer. Neither a UUID, an advertised name, nor a familiar address alone proves which TV is responding. A changed certificate or TV-side authorization reset requires explicit pairing with a fresh code.
+
+Migration creates a persisted UUID plan for every existing device record. Earlier versions could overwrite a saved endpoint from discovery before authentication, so even a unique current address cannot establish which TV owns an old address-based pin. Only an exact, unique last-used record with a recorded successful address is eligible for automatic pin migration. If another saved record now claims that address, migration treats the pin ownership as ambiguous and does not copy it.
+
+The eligible pin is durably copied before the device schema and last-used selection advance together. Retrying an interrupted migration reuses its UUID plan; a failed pin write prevents the original records from being replaced. Existing stable pins are never overwritten. Other legacy records remain saved, but need one explicit pairing to associate an authenticated certificate with their new UUID. This also applies when the successful-address evidence or legacy pin is missing. Once established, the stable pairing supports later address changes without another migration or pairing code.
 
 Pairing secrets and private key material must not appear in logs, documentation, or version control. Their persistence must remain private to the installed application and be excluded from backup where appropriate. Removing local saved state does not necessarily revoke that client's identity on the television; TV-side revocation depends on the service and its settings.
 

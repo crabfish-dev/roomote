@@ -1,5 +1,8 @@
 package com.elvi.tvremote.protocol
 
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.os.Build
@@ -53,18 +56,22 @@ import javax.security.auth.x500.X500Principal
 class RemoteClientIntegrationTest {
     private lateinit var client: RemoteClient
     private val identities = mutableListOf<TestIdentity>()
+    private val savedDeviceIds = mutableListOf<String>()
     private val servers = mutableListOf<TestServer>()
     private val pool = Executors.newCachedThreadPool()
 
     @Before fun setUp() {
         client = RemoteClient(InstrumentationRegistry.getInstrumentation().targetContext)
         client.forget(HOST)
+        client.forget(MOVED_HOST)
     }
 
     @After fun tearDown() {
         client.cancelPairing()
         client.disconnect()
+        savedDeviceIds.forEach { client.forget(HOST, it) }
         client.forget(HOST)
+        client.forget(MOVED_HOST)
         servers.forEach { it.close() }
         pool.shutdownNow()
         identities.forEach { it.close() }
@@ -144,12 +151,158 @@ class RemoteClientIntegrationTest {
         accepted.get(10, TimeUnit.SECONDS)
     }
 
+    @Test fun savedTvReconnectsAtNewIpWithoutPairingAgain() {
+        val deviceId = newSavedDeviceId()
+        val identity = newIdentity()
+        pair(identity, deviceId = deviceId)
+        client = RemoteClient(InstrumentationRegistry.getInstrumentation().targetContext)
+        assertTrue(client.hasPairing(deviceId))
+        assertReconnectCanSendKey(identity, MOVED_HOST, deviceId)
+    }
+
+    @Test fun changedIpDoesNotAllowDifferentTvCertificate() {
+        val deviceId = newSavedDeviceId()
+        pair(newIdentity(), deviceId = deviceId)
+        val replacement = newServer(newIdentity(), MOVED_HOST)
+        val listener = RecordingListener()
+        val accepted = pool.submit {
+            try {
+                replacement.accept().use { socket ->
+                    negotiate(socket)
+                    send(socket, message(40, scalar(1, 1)))
+                }
+            } catch (_: Exception) {
+                // A changed address never relaxes the authenticated certificate pin.
+            }
+        }
+        val failure = runCatching {
+            client.connect(MOVED_HOST, replacement.port, listener, deviceId)
+        }.exceptionOrNull()
+        assertTrue("A different TV certificate was trusted after the IP changed",
+            failure is RemoteClient.PairingRequiredException)
+        assertEquals("Unexpected ready callback", 1L, listener.connected.count)
+        accepted.get(10, TimeUnit.SECONDS)
+    }
+
+    @Test fun savedIdDoesNotFallBackToPinForCurrentAddress() {
+        pair(newIdentity())
+        val deviceId = newSavedDeviceId()
+        assertFalse(client.hasPairing(deviceId))
+        // No server is needed: lack of identity trust must fail before network access.
+        val failure = runCatching {
+            client.connect(HOST, 1, RecordingListener(), deviceId)
+        }.exceptionOrNull()
+        assertTrue("A saved TV silently inherited trust from its current IP",
+            failure is RemoteClient.PairingRequiredException)
+        assertFalse(client.hasPairing(deviceId))
+    }
+
+    @Test fun legacyPairingMigratesAndForgetAfterIpChangeRevokesBothPins() {
+        val identity = newIdentity()
+        val deviceId = newSavedDeviceId()
+        assertFalse(client.migratePairing(deviceId, HOST))
+        pair(identity)
+        onMainWithStrictNetworkPolicy {
+            assertTrue(client.migratePairing(deviceId, HOST))
+            assertTrue(client.hasPairing(deviceId))
+        }
+        client = RemoteClient(InstrumentationRegistry.getInstrumentation().targetContext)
+        assertReconnectCanSendKey(identity, MOVED_HOST, deviceId)
+        onMainWithStrictNetworkPolicy { client.forget(MOVED_HOST, deviceId) }
+        client = RemoteClient(InstrumentationRegistry.getInstrumentation().targetContext)
+        assertFalse(client.hasPairing(deviceId))
+        assertFalse("Forgetting a moved TV left its old address pairing available",
+            client.migratePairing(deviceId, HOST))
+        for (host in listOf(HOST, MOVED_HOST)) {
+            assertTrue(runCatching {
+                client.connect(host, 1, RecordingListener(), deviceId)
+            }.exceptionOrNull() is RemoteClient.PairingRequiredException)
+        }
+        assertTrue("The legacy address pin survived Forget",
+            runCatching { client.connect(HOST, 1, RecordingListener()) }.exceptionOrNull()
+                is RemoteClient.PairingRequiredException)
+    }
+
+    @Test fun migrationAndForgetPreserveDifferentTvThatReusesOldAddress() {
+        val deviceId = newSavedDeviceId()
+        val originalTv = newIdentity()
+        pair(originalTv, deviceId = deviceId)
+        val otherTv = newIdentity()
+        pair(otherTv) // A different, explicitly paired TV now occupies the old IP.
+        assertTrue(client.migratePairing(deviceId, HOST))
+        assertReconnectCanSendKey(originalTv, MOVED_HOST, deviceId)
+        client.forget(HOST, deviceId)
+        assertFalse(client.hasPairing(deviceId))
+        assertReconnectCanSendKey(otherTv)
+    }
+
+    @Test fun migrationStorageFailureThrowsAndRetryPersistsMemoryVisiblePin() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferenceName = "pairing_migration_failure_${UUID.randomUUID()}"
+        val backing = context.getSharedPreferences(preferenceName, Context.MODE_PRIVATE)
+        val legacyKey = "peer." + MessageDigest.getInstance("SHA-256").digest(HOST.toByteArray())
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val legacyPin = "ab".repeat(32)
+        assertTrue(backing.edit().putString(legacyKey, legacyPin).commit())
+        val failing = FailingCommitPreferences(backing)
+        val wrappedContext = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = failing
+        }
+        val isolated = RemoteClient(wrappedContext)
+        val deviceId = UUID.randomUUID().toString()
+        try {
+            val failure = runCatching { isolated.migratePairing(deviceId, HOST) }.exceptionOrNull()
+            assertTrue("A disk write failure looked like an absent legacy pin",
+                failure is IllegalStateException)
+            assertTrue("The failure fixture must model SharedPreferences' memory update",
+                isolated.hasPairing(deviceId))
+            assertEquals("The failed migration wrote the disk backing unexpectedly", 1, backing.all.size)
+            assertTrue(isolated.migratePairing(deviceId, HOST))
+            assertEquals("Retry skipped persisting the already memory-visible pin", 2, failing.commitAttempts)
+            assertEquals(2, backing.all.size)
+            assertEquals("Migration removed its recovery source", legacyPin, backing.getString(legacyKey, null))
+        } finally {
+            context.deleteSharedPreferences(preferenceName)
+        }
+    }
+
+    @Test fun forgettingSavedTvCancelsPairingAfterAddressChange() {
+        val deviceId = newSavedDeviceId()
+        pair(newIdentity(), deviceId = deviceId)
+        val server = newServer(newIdentity(), MOVED_HOST)
+        val waitingForReply = CountDownLatch(1)
+        val accepted = pool.submit {
+            server.accept().use { socket ->
+                assertTrue(readMessage(socket.inputStream).containsKey(10))
+                waitingForReply.countDown()
+                assertEquals(-1, socket.inputStream.read())
+            }
+        }
+        val pending = pool.submit<Throwable?> {
+            runCatching { client.startPairing(MOVED_HOST, server.port, deviceId) }.exceptionOrNull()
+        }
+        if (!waitingForReply.await(10, TimeUnit.SECONDS)) {
+            surfaceServerFailure(accepted)
+            fail("Pairing request never reached the moved TV")
+        }
+        // Even a caller holding the stale address must cancel this identity's session.
+        onMainWithStrictNetworkPolicy { client.forget(HOST, deviceId) }
+        assertNotNull("Forgotten pairing completed successfully", pending.get(3, TimeUnit.SECONDS))
+        accepted.get(3, TimeUnit.SECONDS)
+        assertFalse("Cancelled pairing restored the saved TV pin", client.hasPairing(deviceId))
+    }
+
     @Test fun disconnectOnMainClosesActiveTlsWithoutNetworkViolation() {
         assertMainThreadClose(forget = false)
     }
 
     @Test fun forgetOnMainClosesActiveTlsAndRemovesSavedPin() {
         assertMainThreadClose(forget = true)
+    }
+
+    @Test fun forgetSavedTvOnMainClosesMovedTlsSession() {
+        assertMainThreadClose(forget = true, host = MOVED_HOST, deviceId = newSavedDeviceId())
     }
 
     @Test fun cancellationOnMainInterruptsPairingRead() {
@@ -175,10 +328,10 @@ class RemoteClientIntegrationTest {
         accepted.get(3, TimeUnit.SECONDS)
     }
 
-    private fun assertMainThreadClose(forget: Boolean) {
+    private fun assertMainThreadClose(forget: Boolean, host: String = HOST, deviceId: String? = null) {
         val identity = newIdentity()
-        pair(identity)
-        val server = newServer(identity)
+        pair(identity, deviceId = deviceId)
+        val server = newServer(identity, host)
         val listener = RecordingListener()
         val detached = CountDownLatch(1)
         val transcript = pool.submit {
@@ -208,12 +361,12 @@ class RemoteClientIntegrationTest {
             }
         }
         try {
-            client.connect(HOST, server.port, listener)
+            client.connect(host, server.port, listener, deviceId)
             assertTrue("Remote never became ready", listener.connected.await(10, TimeUnit.SECONDS))
             assertTrue("Initial power callback missing", listener.power.await(10, TimeUnit.SECONDS))
             listener.rejectFurtherCallbacks.set(true)
             onMainWithStrictNetworkPolicy {
-                if (forget) client.forget(HOST) else client.disconnect()
+                if (forget) client.forget(HOST, deviceId) else client.disconnect()
             }
             // Logical detachment must be synchronous even if TLS close is queued.
             assertNotNull("Detached client still accepted a key",
@@ -222,7 +375,7 @@ class RemoteClientIntegrationTest {
             if (!forget) {
                 // Start another session before waiting for the old server's EOF.
                 // Deferred cleanup must close the captured old socket only.
-                assertReconnectCanSendKey(identity)
+                assertReconnectCanSendKey(identity, host, deviceId)
             }
         } finally {
             detached.countDown()
@@ -235,15 +388,19 @@ class RemoteClientIntegrationTest {
             server.close()
             client = RemoteClient(InstrumentationRegistry.getInstrumentation().targetContext)
             val failure = runCatching {
-                client.connect(HOST, port, RecordingListener())
+                client.connect(host, port, RecordingListener(), deviceId)
             }.exceptionOrNull()
             assertTrue("Forgetting must remove the persisted pin and require new pairing",
                 failure is RemoteClient.PairingRequiredException)
         }
     }
 
-    private fun assertReconnectCanSendKey(identity: TestIdentity) {
-        val replacement = newServer(identity)
+    private fun assertReconnectCanSendKey(
+        identity: TestIdentity,
+        host: String = HOST,
+        deviceId: String? = null,
+    ) {
+        val replacement = newServer(identity, host)
         val listener = RecordingListener()
         val transcript = pool.submit {
             replacement.accept().use { socket ->
@@ -253,7 +410,7 @@ class RemoteClientIntegrationTest {
                 assertEquals("Reconnected session did not receive Home", 3L, key.getValue(1).number)
             }
         }
-        client.connect(HOST, replacement.port, listener)
+        client.connect(host, replacement.port, listener, deviceId)
         assertTrue("New session was interrupted by old socket cleanup",
             listener.connected.await(10, TimeUnit.SECONDS))
         client.sendKey(3)
@@ -281,8 +438,8 @@ class RemoteClientIntegrationTest {
         failure.get()?.let { throw AssertionError("Main-thread TLS close failed", it) }
     }
 
-    private fun pair(identity: TestIdentity) {
-        val server = newServer(identity)
+    private fun pair(identity: TestIdentity, host: String = HOST, deviceId: String? = null) {
+        val server = newServer(identity, host)
         val code = CompletableFuture<String>()
         val transcript = pool.submit {
             server.accept().use { socket ->
@@ -308,7 +465,7 @@ class RemoteClientIntegrationTest {
             }
         }
         try {
-            client.startPairing(HOST, server.port)
+            client.startPairing(host, server.port, deviceId)
             client.completePairing(code.get(10, TimeUnit.SECONDS))
         } catch (error: Exception) {
             surfaceServerFailure(transcript)
@@ -334,7 +491,35 @@ class RemoteClientIntegrationTest {
     }
 
     private fun newIdentity(): TestIdentity = TestIdentity().also(identities::add)
-    private fun newServer(identity: TestIdentity): TestServer = TestServer(identity).also(servers::add)
+    private fun newSavedDeviceId(): String = UUID.randomUUID().toString().also(savedDeviceIds::add)
+    private fun newServer(identity: TestIdentity, host: String = HOST): TestServer =
+        TestServer(identity, host).also(servers::add)
+
+    /** Model commit(false): updates are visible in memory but absent from durable storage. */
+    private class FailingCommitPreferences(private val backing: SharedPreferences) : SharedPreferences by backing {
+        private val memory = backing.all.filterValues { it is String }.mapValues { it.value as String }.toMutableMap()
+        var commitAttempts = 0
+            private set
+        override fun contains(key: String): Boolean = memory.containsKey(key)
+        override fun getString(key: String, defValue: String?): String? = memory[key] ?: defValue
+        override fun getAll(): MutableMap<String, *> = memory.toMutableMap()
+        override fun edit(): SharedPreferences.Editor {
+            val diskEditor = backing.edit()
+            val changes = mutableMapOf<String, String?>()
+            return object : SharedPreferences.Editor by diskEditor {
+                override fun putString(key: String, value: String?): SharedPreferences.Editor {
+                    changes[key] = value
+                    diskEditor.putString(key, value)
+                    return this
+                }
+                override fun commit(): Boolean {
+                    changes.forEach { (key, value) -> if (value == null) memory.remove(key) else memory[key] = value }
+                    commitAttempts++
+                    return if (commitAttempts == 1) false else diskEditor.commit()
+                }
+            }
+        }
+    }
 
     private class RecordingListener : RemoteClient.Listener {
         val connected = CountDownLatch(1)
@@ -407,7 +592,7 @@ class RemoteClientIntegrationTest {
         override fun close() { keyStore.deleteEntry(alias) }
     }
 
-    private class TestServer(identity: TestIdentity) : AutoCloseable {
+    private class TestServer(identity: TestIdentity, host: String) : AutoCloseable {
         // This permissive trust manager exists only in the local test server.
         // Production client validation is exercised by the replacement test.
         private val context = SSLContext.getInstance("TLS").apply {
@@ -421,7 +606,7 @@ class RemoteClientIntegrationTest {
             }), SecureRandom())
         }
         private val server = (context.serverSocketFactory.createServerSocket(
-            0, 1, InetAddress.getByName(HOST)) as SSLServerSocket).apply {
+            0, 1, InetAddress.getByName(host)) as SSLServerSocket).apply {
             enabledProtocols = arrayOf("TLSv1.2")
             needClientAuth = true
             soTimeout = 10_000
@@ -436,6 +621,7 @@ class RemoteClientIntegrationTest {
 
     companion object {
         private const val HOST = "127.0.0.1"
+        private const val MOVED_HOST = "127.0.0.2"
 
         private fun surfaceServerFailure(future: java.util.concurrent.Future<*>) {
             try {

@@ -330,9 +330,43 @@ class MainActivity : Activity() {
             }
         }
         if (state.selected?.saved == true && state.phase in listOf(ConnectionPhase.IDLE, ConnectionPhase.CONNECTED, ConnectionPhase.ERROR)) {
+            if (state.phase != ConnectionPhase.CONNECTED) {
+                actions.addView(smallAction("Update address") { showAddressUpdate() })
+            }
             actions.addView(smallAction("Forget TV") { controller.forgetSelected() })
         }
         actions.visibility = if (actions.childCount == 0) View.GONE else View.VISIBLE
+    }
+
+    private fun showAddressUpdate() {
+        val tv = state.selected?.takeIf { it.saved } ?: return
+        val (dialog, body) = createDialog("Update TV address", "Enter the current address for ${tv.name}. Your existing pairing will be checked before the address is saved.")
+        val address = editText("TV IP address or hostname").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
+            setSingleLine()
+            setText(tv.host)
+            selectAll()
+            minimumHeight = dp(54)
+        }
+        body.addView(address, LinearLayout.LayoutParams(-1, -2))
+        val error = text(this, "", 12f, RoomoteStyle.accent)
+        body.addView(error)
+        val submit: () -> Unit = {
+            if (controller.updateSelectedAddress(address.text.toString())) {
+                hideKeyboard(address)
+                dialog.dismiss()
+            } else {
+                error.text = state.message
+                address.requestFocus()
+            }
+        }
+        body.space(12)
+        body.addView(primaryAction("Verify and connect", submit), LinearLayout.LayoutParams(-1, -2))
+        address.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO) { submit(); true } else false
+        }
+        dialog.showStyled()
     }
 
     private fun smallAction(label: String, action: () -> Unit) = text(this, label, 12f, RoomoteStyle.accent, true).apply {

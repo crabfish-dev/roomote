@@ -47,13 +47,13 @@ class RemoteClient(context: Context) {
     private var remote: RemoteSession? = null
     private var pairing: PairSession? = null
 
-    private class RemoteSession(val host: String, val listener: Listener) {
+    private class RemoteSession(val pinKey: String, val listener: Listener) {
         @Volatile var socket: SSLSocket? = null
         @Volatile var ready = false
         val writeLock = Any()
     }
 
-    private class PairSession(val host: String) {
+    private class PairSession(val pinKey: String) {
         @Volatile var socket: SSLSocket? = null
         @Volatile var ready = false
         @Volatile var peer: X509Certificate? = null
@@ -61,16 +61,16 @@ class RemoteClient(context: Context) {
     }
 
     /** No silent trust-on-first-use: a saved code-authenticated certificate is mandatory. */
-    fun connect(host: String, port: Int = 6466, listener: Listener) {
+    fun connect(host: String, port: Int = 6466, listener: Listener, deviceId: String? = null) {
         val target = normalizeHost(host)
         checkPort(port)
-        val session = RemoteSession(target, listener)
+        val session = RemoteSession(pairingKey(target, deviceId), listener)
         val previous = synchronized(stateLock) {
             remote.also { remote = session; it?.ready = false }
         }
         closeQuietly(previous?.socket)
         try {
-            val expected = preferences.getString(pinKey(target), null)
+            val expected = preferences.getString(session.pinKey, null)
                 ?: throw PairingRequiredException("Pair with this TV using the code on its screen first.")
             val socket = openSocket(target, port, expected) { opened ->
                 synchronized(stateLock) {
@@ -91,10 +91,10 @@ class RemoteClient(context: Context) {
     }
 
     /** Starts the TV code prompt. The socket remains open while the human enters the code. */
-    fun startPairing(host: String, port: Int = 6467) {
+    fun startPairing(host: String, port: Int = 6467, deviceId: String? = null) {
         val target = normalizeHost(host)
         checkPort(port)
-        val session = PairSession(target)
+        val session = PairSession(pairingKey(target, deviceId))
         val previous = synchronized(stateLock) {
             val sockets = listOf(remote?.socket, pairing?.socket)
             remote?.ready = false
@@ -157,7 +157,7 @@ class RemoteClient(context: Context) {
                 readPair(socket, 41)
                 synchronized(stateLock) {
                     if (pairing !== session) throw IOException("Pairing cancelled")
-                    preferences.edit().putString(pinKey(session.host), fingerprint(peer)).apply()
+                    preferences.edit().putString(session.pinKey, fingerprint(peer)).apply()
                 }
             } catch (error: Exception) {
                 throw connectionError(error)
@@ -193,22 +193,58 @@ class RemoteClient(context: Context) {
         closeQuietly(previous?.socket)
     }
 
-    /** Forgets this address locally. Removing the phone from TV settings is a separate action. */
-    fun forget(host: String) {
+    /** Whether this saved TV has a code-authenticated pin, independent of its current address. */
+    fun hasPairing(deviceId: String): Boolean = preferences.contains(identityPinKey(deviceId))
+
+    /**
+     * Upgrade an old address-based pairing without connecting or changing an existing TV pin.
+     * Returns false only when no legacy pin exists; storage failure throws so the caller
+     * cannot finish migrating its device records without preserving their trust.
+     * Safe to call from the main thread.
+     */
+    fun migratePairing(deviceId: String, legacyHost: String): Boolean {
+        val key = identityPinKey(deviceId)
+        val legacyKey = pinKey(normalizeHost(legacyHost))
+        return synchronized(stateLock) {
+            val pin = preferences.getString(key, null)
+                ?: preferences.getString(legacyKey, null) ?: return@synchronized false
+            // The device store may finish its schema migration after this succeeds.
+            // Persist the copied trust first so process death cannot lose the pairing.
+            // Re-commit existing values too: a failed commit can already be visible
+            // in SharedPreferences memory when the caller retries in this process.
+            check(preferences.edit().putString(key, pin).commit()) {
+                "Could not preserve the TV pairing. Please try again."
+            }
+            true
+        }
+    }
+
+    /** Forgets this TV locally. Removing the phone from TV settings is a separate action. */
+    fun forget(host: String, deviceId: String? = null) {
         val target = normalizeHost(host)
+        val key = pairingKey(target, deviceId)
         val sockets = synchronized(stateLock) {
+            val keys = mutableSetOf(key)
+            if (deviceId != null) {
+                val pin = preferences.getString(key, null)
+                // A migrated TV can have legacy pins at earlier IPs. Remove only pins
+                // for the same certificate, never another TV that now occupies its IP.
+                if (pin != null) preferences.all.forEach { (savedKey, savedPin) ->
+                    if (savedKey.startsWith(LEGACY_PIN_PREFIX) && savedPin == pin) keys += savedKey
+                }
+            }
             val closing = mutableListOf<SSLSocket?>()
-            remote?.takeIf { it.host == target }?.let {
+            remote?.takeIf { it.pinKey in keys }?.let {
                 it.ready = false
                 closing += it.socket
                 remote = null
             }
-            pairing?.takeIf { it.host == target }?.let {
+            pairing?.takeIf { it.pinKey in keys }?.let {
                 it.ready = false
                 closing += it.socket
                 pairing = null
             }
-            preferences.edit().remove(pinKey(target)).apply()
+            preferences.edit().also { editor -> keys.forEach(editor::remove) }.apply()
             closing
         }
         sockets.forEach(::closeQuietly)
@@ -369,6 +405,8 @@ class RemoteClient(context: Context) {
     }
 
     companion object {
+        private const val LEGACY_PIN_PREFIX = "peer."
+        private const val IDENTITY_PIN_PREFIX = "device."
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val HANDSHAKE_TIMEOUT_MS = 15_000
         private const val IDLE_TIMEOUT_MS = 30_000
@@ -386,7 +424,13 @@ class RemoteClient(context: Context) {
         private fun checkPort(port: Int) {
             require(port in 1..65535) { "Invalid TV port" }
         }
-        private fun pinKey(host: String): String = "peer." + hexDigest(host.toByteArray(Charsets.UTF_8))
+        private fun pinKey(host: String): String = LEGACY_PIN_PREFIX + hexDigest(host.toByteArray(Charsets.UTF_8))
+        private fun identityPinKey(deviceId: String): String {
+            require(deviceId.isNotBlank() && deviceId.length <= 253) { "Invalid saved TV identity" }
+            return IDENTITY_PIN_PREFIX + hexDigest(deviceId.toByteArray(Charsets.UTF_8))
+        }
+        private fun pairingKey(host: String, deviceId: String?): String =
+            if (deviceId == null) pinKey(host) else identityPinKey(deviceId)
         private fun fingerprint(certificate: X509Certificate): String = hexDigest(certificate.encoded)
         private fun hexDigest(bytes: ByteArray): String =
             MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {

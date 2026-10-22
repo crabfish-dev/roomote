@@ -5,8 +5,6 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,10 +31,7 @@ class ControllerLifecycleTest {
     @Before fun setUp() {
         context = IsolatedContext(instrumentation.targetContext)
         val prefs = context.getSharedPreferences("roomote.devices", Context.MODE_PRIVATE)
-        val devices = JSONArray().put(JSONObject()
-            .put("id", tv.id).put("name", tv.name).put("host", tv.host)
-            .put("port", tv.port).put("pairingPort", tv.pairingPort))
-        assertTrue(prefs.edit().putString("devices", devices.toString()).commit())
+        SavedTvStore(prefs).save(listOf(tv))
         LastUsedTvStore(prefs).remember(tv)
         onMain { controller = RemoteController(context) { firstScreen.add(it) } }
         // Do not call start(): no NSD discovery. Empty, isolated pin storage makes
